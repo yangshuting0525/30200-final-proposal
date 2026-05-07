@@ -1,0 +1,70 @@
+\documentclass[12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage{microtype}
+\usepackage{setspace}
+\usepackage{titlesec}
+\usepackage{parskip}
+\usepackage{times}
+\usepackage{graphicx}
+\usepackage{attachfile}
+
+\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
+\titlespacing*{\section}{0pt}{1.5ex plus .5ex}{0.8ex plus .2ex}
+
+\setstretch{1.15}
+
+\begin{document}
+
+\section{Data}
+
+This study uses data collected from Reddit through the third-party Reddit API (Arctic Shift, https://arctic-shift.photon-reddit.com/download-tool). Data collection focuses on three subreddits that cover different topic areas: a mental health community (\texttt{r/depression}), a loseit community (\texttt{r/loseit}), and a technology-related community (\texttt{r/learnprogramming}). These three were chosen to test whether the findings generalize across different social contexts rather than being specific to one type of community.
+
+For each subreddit, two types of data are collected. The first is post and comment records, which include the author's username (user ID), text data, the timestamp, and subreddit name. The second is the relationship between the replies (\texttt{parent\_id}), which record who replied to whom and are used to build the social network graph for each user.
+
+All posts and comments are grouped by user ID and then two filtering steps are applied. First, accounts where the author field is recorded as \texttt{[deleted]} or \texttt{[removed]} are excluded, as these indicate accounts that have been deleted or suspended by Reddit(their inactivity is externally imposed rather than voluntary).  Second, users whose total post count falls in the bottom 5\%  of all users within each subreddit are excluded to ensure the BG/NBD model produces reliable estimates. This threshold is calculated separately for each subreddit so that it adapts to activity level of each community. Each user's observation period runs from their first post to January 2026. This filtering step is expected to yield tens of thousands of qualifying users per subreddit.
+
+It is worth noting that if a user deleted or was banned from their account after the data were collected by Arctic Shift, their posts would still appear under their original username in the archive rather than being marked as \texttt{[deleted]} or \texttt{[removed]}. These accounts cannot be identified and will remain in the dataset. This is a known limitation of using archival Reddit data.
+
+Another practical challenge is data volume. A single active subreddit spanning several years can produce tens of millions of records. Processing this at scale requires chunked data loading and efficient filtering before any modelling steps are run. Storage and computation will likely need to be handled on a university computing cluster such as Midway, or a cloud platform such as AWS, rather than a local machine.
+
+\section{Method}
+
+This study uses the BG/NBD (Beta Geometric/Negative Binomial Distribution) model to assign churn labels. It estimates two quantities simultaneously: how often a user is expected to post while still active, and the probability that they have already permanently stopped. Each user's history is split into a calibration period (used to fit the model) and a holdout period (used to validate predictions). The key inputs are frequency, recency, and $T$ (tenure). A user is classified as churned if their estimated probability of still being active falls below a defined threshold  at the end of the observation window and they made no posts during the holdout period.
+
+Two groups of features are extracted per user during the calibration period. NLP features include sentiment trajectory (VADER), topic drift (BERTopic), and lexical diversity (type--token ratio). Network features include degree centrality, interaction diversity (whether a user increasingly interacts with only a fixed set of people), and temporal interaction frequency (the trend in interaction count across successive time windows).
+
+Three models are then trained and compared: Model~A (NLP features only), Model~B (network features only), and Model~C (both combined). Each model uses logistic regression and random forest as classifiers. Performance is evaluated using  AUC-ROC and F1-score as primary metrics, with SMOTE applied to handle class imbalance. SHAP values are applied to Model~C to identify which features matter most.
+
+\section{Evaluation}
+
+This design has several strengths. The most important one is the three-model comparison structure. Rather than simply claiming that combining NLP and network features is better, the design directly tests whether it is by training all three models on the same data and comparing their performance. This makes the contribution empirical rather than just argumentative. 
+
+Second, using BG/NBD for churn labeling is also a strength because it accounts for the irregular posting patterns of Reddit users. A user who has been quiet for two months may still be active, and BG/NBD can estimate this probability, which a simple activity cutoff cannot.
+
+Third, running the comparison across three subreddits with different topic types adds external validity. If the combined model consistently outperforms the single-feature models across all three communities, that is stronger evidence than results from a single subreddit.
+
+There are some limitations worth acknowledging. The study is observational and retrospective. It can identify which behavioral patterns are associated with later disengagement, but it cannot establish why users leave. Declining sentiment, for example, might reflect negative experiences on the platform or something unrelated to it entirely. BERTopic is computationally expensive for large subreddits and may require access to a computing cluster, which adds a practical constraint on the timeline.
+
+Despite these limitations, this design is the most direct way to answer the research question. Any other design, such as using only one feature type or skipping the comparison entirely, would leave the central question unanswered. The choice of logistic regression and random forest as classifiers keeps the models interpretable and well-understood, which is appropriate for a study where feature importance analysis is a key part of the contribution.
+
+\section{Proof of Concept}
+
+For this study I have collected all three datasets through the Arctic Shift Reddit archive. The full collection contains approximately 646,000 posts and 4.51 million comments for r/learnprogramming, 6.94 million posts and 101 million comments for r/loseit, and 1.96 million posts and 6.82 million comments for r/depression.
+
+As an initial implementation, I completed the full cleaning pipeline on the r/learnprogramming posts. The cleaning pipeline applies three filters in sequence: removing [deleted] and [removed] authors (since their inactivity is externally imposed), excluding known bots, and dropping users whose post count falls in the bottom 5 percent of the subreddit. For each qualifying user, I then compute the three BG/NBD inputs (frequency, recency, and T) and keep only the fields needed for later modeling. 
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.85\textwidth]{fig1_monthly_posts.png}
+    \caption{Monthly post volume in r/learnprogramming from 2009 to 2026. 
+    The apparent gap in mid-2024 likely reflects a pause in Arctic Shift coverage rather than a real drop in activity.}
+    \label{fig:monthly}
+\end{figure}
+
+
+After cleaning, the dataset contains 596,934 posts from 117,062 qualifying users (attached as user\_summary.csv and user\_summary.csv). Figure 1 shows the monthly post volume in r/learnprogramming from 2009 to 2026. Activity grew steadily from 2010 to around 2020, then increased more sharply between 2020 and 2023. A large jump appears in early 2024, followed by a brief drop in mid-2024 before returning to the higher level.
+
+
+\end{document}

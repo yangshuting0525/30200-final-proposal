@@ -1,0 +1,126 @@
+\documentclass[12pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{setspace}
+\usepackage{parskip}
+\usepackage{hyperref}
+\doublespacing
+
+
+\begin{document}
+\begin{center}
+    {\LARGE \textbf{Assignment 3}}
+\end{center}
+
+
+
+\section*{Research Question}
+
+Do Reddit users show detectable behavioral shifts in language use and social network activity before they disengage, and does combining NLP-based features with social network features produce meaningfully better churn predictions than either feature type used alone?
+
+The specific contribution of this study lies in the feature comparison structure. Prior work has used NLP features and network features separately to study user behavior on Reddit, but no study has directly tested whether the two types of features capture different and complementary dimensions of pre-churn behavior. This study addresses that gap by running a controlled comparison of three models: NLP only, network only, and combined, evaluating whether the gains from combining them are consistent across different community types.
+
+\section*{Research Design}
+
+\subsection*{Dataset}
+
+Data will be collected from three subreddits using Arctic Shift, a third-party Reddit data archive that provides large-scale historical dumps of Reddit posts and comments:
+
+\begin{itemize}
+    \item r/depression (mental health community)
+    \item r/gaming (hobby and entertainment community)
+    \item r/learnprogramming (technology learning community)
+\end{itemize}
+
+These three subreddits differ in topic type, emotional tone, and the kind of motivation users have for participating. This variation is intentional: if the same pre-churn signals appear across all three communities, that provides stronger evidence that the findings reflect something general about user disengagement rather than something specific to one type of community.
+
+Data will be collected from Arctic Shift, which archives these subreddits from their creation through January 2026, serving as the fixed observation endpoint. All posts and comments within this period will be downloaded and grouped by user ID. Users with fewer than 3 posts will be excluded (required for the BG/NBD model to produce reliable estimates). Each remaining user's lifetime is defined as the period from their first post to January 2026. Based on the activity levels of these communities, this filtering step is expected to yield tens of thousands of qualifying users per subreddit.
+
+\subsection*{Defining Churn}
+
+This study uses the BG/NBD (Beta Geometric Negative Binomial Distribution) model to assign churn labels, following the approach used in Das (2025) and Afif (n.d.). The BG/NBD is a probabilistic model designed for non-contractual settings, situations where users interact at self-determined intervals rather than on a fixed schedule. It models two things at once: how often a user is expected to post while still active, and the probability that the user has already permanently dropped out after their most recent post.
+
+Following the standard BG/NBD methodology, each user's full activity history is divided into a calibration period and a holdout period. The calibration period is used to estimate the model's parameters; the holdout period is used to validate the predictions. The key inputs are derived from each user's entire observed lifetime on the subreddit:
+
+\begin{itemize}
+    \item \textbf{Frequency:} number of repeat posts or comments after the first
+    \item \textbf{Recency:} time between the user's first and most recent post
+    \item \textbf{T (tenure):} total time from the user's first post to the end of the observation window
+\end{itemize}
+
+A user is classified as churned if their estimated probability of being active (given their posting history) falls below a defined threshold (e.g., 0.10) at the end of the observation window, and if they have made no posts during the holdout period.
+
+This approach fits Reddit better than a simple inactivity cutoff because Reddit users do not post on a regular schedule. A user might be absent for several weeks and then return, or they might post frequently for a short period and then stop permanently. The BG/NBD model is specifically built to handle this kind of irregular, sporadic activity pattern. In this framework, each Reddit post or comment is treated as the equivalent of a customer transaction.
+
+\subsection*{Feature Extraction}
+
+Two groups of features are extracted per user, measured during the calibration period:
+
+\textbf{NLP features (content-level signals):}
+\begin{itemize}
+    \item Sentiment trajectory using VADER: weekly average sentiment score and the slope of change over time
+    \item Topic drift using BERTopic: whether a user's posts gradually move toward topics that are peripheral to the subreddit's core discussions
+    \item Lexical diversity: type-token ratio per time window, as a proxy for engagement and expressive effort
+\end{itemize}
+
+\textbf{Social network features (structural signals):}
+\begin{itemize}
+    \item Degree centrality in the weekly reply graph
+    \item Change in interaction circle size: number of unique users a person replied to or received replies from across successive time windows
+    \item Clustering coefficient: how tightly connected a user's immediate network is
+\end{itemize}
+
+\subsection*{Analytical Strategy}
+
+Three classifiers will be trained and compared:
+
+\begin{itemize}
+    \item \textbf{Model A:} NLP features only
+    \item \textbf{Model B:} Network features only
+    \item \textbf{Model C:} NLP + network features combined
+\end{itemize}
+
+Each model will be trained using logistic regression and random forest. The comparison will be evaluated using AUC-ROC, F1-score, precision, and recall. Because churned users are likely to be a minority in the dataset, AUC-ROC and recall are treated as the primary metrics.
+
+This three-model comparison is the core of the study's design. The research question is specifically about whether combining the two feature types gives consistent and meaningful improvements over either alone. If Model C outperforms both A and B across all three subreddits, that is evidence that NLP and network features capture different dimensions of disengagement and are genuinely complementary. If the combined model only improves performance in some subreddits, that is also an informative finding about how disengagement may work differently across community types.
+
+The reason for expecting NLP and network features to be complementary is that they reflect different pathways toward disengagement. NLP features capture changes in what a user talks about and how they express themselves, reflecting content-level withdrawal. Network features capture changes in who a user interacts with and how embedded they are in the community, reflecting structural withdrawal. A model using only one type of feature may miss users whose disengagement follows the other path. The empirical comparison will test whether this theoretical distinction holds in practice.
+
+Feature importance analysis using SHAP values will also be applied to the combined model to identify which specific features matter most, which adds interpretability alongside prediction accuracy.
+
+\section*{Feasibility}
+
+\textbf{Data collection:} Arctic Shift provides historical data dumps for a large number of subreddits, including r/depression, r/gaming, and r/learnprogramming. This archive has been widely used in recent Reddit research and does not require API access or special permissions for public subreddit data. A preliminary check confirms that all three subreddits are available in the archive, with data coverage spanning from each subreddit's creation through early 2026. The main task is to download the full post and comment history, filter by user ID, exclude users with fewer than 3 posts, and compute the BG/NBD input variables for each remaining individual.
+
+\textbf{BG/NBD implementation:} The \texttt{lifetimes} library in Python provides a ready-to-use implementation of the BG/NBD model. Setting up the calibration/holdout split and generating the probability-of-alive estimates for each user is a manageable task, and the library is well-documented.
+
+\textbf{NLP tools:} VADER is simple to run and works well on short informal texts like Reddit posts. BERTopic is more computationally demanding because it uses transformer embeddings to cluster topics. For large subreddits, this may require running the analysis on a university computing cluster (e.g., Midway) or a cloud platform (e.g., Colab Pro).
+
+\textbf{Network construction:} Reply graphs will be built from comment data using the \texttt{networkx} library in Python. Each node is a user, and an edge is drawn when one user replies to another within a given time window. This is straightforward to implement and scales well for the data sizes expected here.
+
+\textbf{Class imbalance:} Churned users are likely to be a minority in the dataset, which is a common problem in churn prediction research. This will be handled using SMOTE oversampling or class-weighted loss in the classifier.
+
+\textbf{Data volume:} One practical challenge is the sheer size of the dataset. Based on prior experience scraping Reddit data, where a single subreddit over three years yielded approximately 25 million posts and comments, collecting the full lifetime history of three subreddits spanning over a decade is expected to produce hundreds of millions of records in total. Processing this volume of raw data will require careful pipeline design, including chunked data loading and efficient filtering by user ID before any modeling steps are run. Storage and processing will likely need to be handled on a university computing cluster (e.g., Midway) rather than a local machine.
+
+\textbf{BG/NBD model stability:} Even after filtering for users with at least 3 posts, some users may have a very short or highly concentrated posting history, which can make BG/NBD parameter estimates unstable. This will be monitored during model fitting and reported transparently.
+
+\section*{Fit Between Research Question and Design}
+
+The research question asks whether NLP and network features are complementary for predicting individual-level churn on Reddit. The design answers this directly through the three-model comparison, with explicit performance evaluation across three different subreddits. Each design choice maps onto a specific part of the question: the BG/NBD model produces the individual-level churn labels; the two feature groups operationalize the two behavioral signals; and the three-subreddit structure tests whether any findings hold across different community contexts.
+
+One limitation worth acknowledging is that the study is observational and retrospective. It identifies which behavioral patterns are associated with later disengagement, but it cannot establish why users leave. A user's declining sentiment, for example, might reflect negative experiences on the platform or something happening in their life outside it. The study cannot distinguish between these explanations, and predictions should be interpreted with this in mind.
+
+\section*{Potential Faculty Advisors}
+
+\textbf{Dr. Henry K. Dambanemuya}
+
+Dr. Dambanemuya is the instructor for this course, so he is already familiar with the project. His research looks at how people behave and interact in online communities. For example, how influence spreads in online discussions and how crowds make collective decisions on platforms like Reddit, which overlaps well with what this project is trying to do.
+
+\textbf{Dr. Zhao Wang}
+
+Dr. Wang's research focuses on utilizing NLP to study social media, including detecting deceptive language, measuring online communication patterns, and analyzing text from social platforms to understand social behavior. Since NLP is one of the main methods in this project, she would be a good fit for advising on that part.
+
+\textbf{Dr. James A. Evans}
+
+Dr. Evans directs the Knowledge Lab at UChicago, where he studies how people produce and share knowledge in online communities, using tools like social network analysis and machine learning on large-scale digital data. Given that this project is essentially about understanding how and why users disengage from online communities, his broader research perspective on collective online behavior would be a valuable match.
+
+\end{document}

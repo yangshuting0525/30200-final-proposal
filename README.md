@@ -4,54 +4,209 @@
 
 Do Reddit users show detectable behavioral shifts in language use and social network activity before they disengage, and does combining NLP-based features with social network features produce meaningfully better churn predictions than either feature type used alone?
 
+---
 
-## Part 1: r/learnprogramming
+## Data
 
-**Figure 1.** BG/NBD input variable distributions for r/learnprogramming (N = 117,062 qualifying users).
+Three subreddits collected via Arctic Shift (observation window: subreddit creation to January 1, 2026):
 
-![BG/NBD Distributions: r/learnprogramming](figures/fig_lp_bgnbd.png)
+| Subreddit | Type | Raw Posts | Raw Comments |
+|---|---|---|---|
+| r/learnprogramming | Technology learning | ~646K | ~4.51M |
+| r/loseit | Lifestyle / weight loss | ~704K | ~8.59M |
+| r/depression | Mental health | ~1.96M | ~6.82M |
 
-**Interpretation:** All three distributions are strongly right-skewed. Most users have a frequency of 1 (only one repeat visit after joining) and a recency of 0 weeks (their first and last activity happened within the same week). At the same time, most users have a T of several years, meaning they joined a long time ago but barely came back. Most users posted only a handful of times and then stopped, and this pattern holds across all three subreddits.
+**Filtering steps applied to all three subreddits:**
+1. Remove `[deleted]` / `[removed]` authors
+2. Remove duplicate posts/comments (same author + same content)
+3. Remove known bots
+4. Remove users in the bottom 5% of activity (threshold computed per subreddit)
 
-**Figure 2.** Log-log degree distribution of the reply network for r/learnprogramming (1,998,645 edges, 369,537 nodes).
+---
 
-![Network Log-Log: r/learnprogramming](figures/fig_lp_network.png)
+## Pipeline
 
-**Interpretation:** Both the out-degree (replies sent) and in-degree (replies received) distributions show a roughly linear trend on the log-log scale, which indicates a power-law pattern. In practice this means most users sent or received very few replies, while a small number of users were extremely active in the network. The average out-degree is 6.17 but the median is only 2, which captures this gap well. This uneven structure means most users were fairly peripheral in the network, while a small group of users drove the majority of all reply activity.
+```
+EDA (completed)
+    │
+    ▼
+Phase 1: Churn Labeling (BG/NBD)
+    │   └─ Output: churned / active label per user (Y)
+    │
+    ▼
+Phase 2: Feature Engineering (X)
+    │   ├─ NLP features (content-level)
+    │   └─ Network features (structural-level)
+    │
+    ▼
+Phase 3: Model Training
+    │   ├─ Model A: NLP features only
+    │   ├─ Model B: Network features only
+    │   └─ Model C: NLP + Network (combined)
+    │   Each model trained with Logistic Regression + Random Forest
+    │
+    ▼
+Phase 4: Evaluation & Cross-subreddit Comparison
+        └─ AUC-ROC, F1, SHAP feature importance
+```
+
+---
+
+## Phase 1: Churn Labeling via BG/NBD
+
+The BG/NBD (Beta Geometric / Negative Binomial Distribution) model is used to generate churn labels. It is suited for non-contractual settings where users interact at self-determined intervals rather than on a fixed schedule.
+
+**Inputs (already computed in EDA):**
+- `frequency`: number of repeat interactions after the first
+- `recency`: weeks between first and last interaction
+- `T`: weeks from first interaction to January 2026
+
+**Procedure:**
+1. Split each user's history into a calibration period and a holdout period
+2. Fit BG/NBD on the calibration period using the `lifetimes` library
+3. Compute `p_alive` (probability of still being active) for each user
+4. Label as **churned** (`y = 1`) if `p_alive < 0.10` AND no activity in holdout period; otherwise **active** (`y = 0`)
+
+---
+
+## Phase 2: Feature Engineering
+
+All features are computed from the **calibration period only**.
+
+### NLP Features (content-level signals)
+
+| Feature | Description | Method |
+|---|---|---|
+| Sentiment trajectory | Weekly average VADER sentiment score + slope of change over time | VADER |
+| Lexical diversity | Type-token ratio per time window (unique words / total words) | Text stats |
+| Average post length | Mean word count per text post | Text stats |
+| Average comment length | Mean word count per comment | Text stats |
+| Post-to-comment ratio | Share of contributions that are posts vs. comments | Activity stats |
+
+### Network Features (structural signals)
+
+Features are computed from the reply graph (directed: user A replied to user B).
+
+**Static structural features** (Krebs 2002; ICTS 2002; Homophily & Descriptive Measures):
+
+| Feature | Description |
+|---|---|
+| Out-degree | Number of replies sent |
+| In-degree | Number of replies received |
+| Local clustering coefficient | How tightly connected a user's neighbors are to each other |
+| K-core number | Maximum k-core the user belongs to; distinguishes core vs. peripheral users |
+
+**Dynamic/temporal features:**
+
+| Feature | Description |
+|---|---|
+| Interaction diversity | Number of unique users interacted with per time window + trend (slope) |
+| Temporal interaction frequency | Interaction count per time window + trend (slope) |
+
+**Community-level features** (Modularity / Community Detection; Structural Holes):
+
+| Feature | Description |
+|---|---|
+| Community size | Size of the Louvain community the user belongs to |
+| Within-community activity share | Fraction of interactions within vs. outside the user's community |
+
+---
+
+## Phase 3: Model Training
+
+Three feature configurations are tested on **all three subreddits**:
+
+| Model | Features Used |
+|---|---|
+| Model A | NLP features only |
+| Model B | Network features only |
+| Model C | NLP + Network (combined) |
+
+Each configuration is trained with two classifiers:
+- **Logistic Regression** (interpretable baseline)
+- **Random Forest** (captures nonlinear interactions)
+
+**Class imbalance:** Handled with SMOTE oversampling or class-weighted loss.
+
+---
+
+## Phase 4: Evaluation
+
+**Primary metrics:** AUC-ROC, F1-score
+
+**Secondary metrics:** Precision, Recall
+
+**Feature importance:** SHAP values applied to Model C (combined) to identify which features drive predictions.
+
+**Cross-subreddit comparison:** If Model C consistently outperforms Models A and B across all three subreddits, this supports the conclusion that NLP and network features capture complementary dimensions of user disengagement. If the improvement is community-specific, that is also an informative finding about how disengagement works differently across contexts.
+
+---
+
+## Key Decisions and Rationale
+
+| Decision | Rationale |
+|---|---|
+| BG/NBD for churn labeling | Accounts for irregular posting patterns; does not require a fixed inactivity cutoff |
+| No BERTopic | Computationally expensive for large subreddits; VADER + lexical diversity are sufficient content-level signals |
+| K-core instead of betweenness centrality | Betweenness is computationally infeasible for million-edge graphs; k-core identifies peripheral vs. core users at O(E) cost |
+| Louvain community detection | Fast (O(E log V)), widely validated, captures community structure relevant to retention |
+| Three subreddits | Tests whether findings generalize across different community types (learning, lifestyle, mental health) |
+
+---
+
+## Project Structure
+
+```
+final_proposal/
+├── code/
+│   └── EDA.ipynb          # Exploratory data analysis (all 3 subreddits)
+├── data/
+│   ├── learnprogramming/  # r/learnprogramming posts + comments
+│   ├── loseit/            # r/loseit posts + comments
+│   └── depression/        # r/depression posts + comments
+├── figures/               # EDA figures
+├── 参考/                  # Reference papers and prior proposals
+└── README.md
+```
 
 
-## Part 2: r/loseit
-
-**Figure 3.** BG/NBD input variable distributions for r/loseit (N = 175,975 qualifying users).
-
-![BG/NBD Distributions: r/loseit](figures/fig_lo_bgnbd.png)
-
-**Interpretation:** The distributions look very similar to r/learnprogramming: most users have a frequency of 1, a recency of 0 weeks, and a tenure of several years. One difference is that the mean frequency here is 9.46, higher than in r/learnprogramming (6.57), which suggests r/loseit users tend to post somewhat more often on average. This probably reflects that r/loseit users often share weight loss progress updates regularly, so they tend to post more than users in a Q&A-style community. Even so, the overall picture is the same: most users are concentrated at the low end of all three variables.
-
-**Figure 4.** Log-log degree distribution of the reply network for r/loseit (3,550,327 edges, 493,377 nodes).
-
-![Network Log-Log: r/loseit](figures/fig_lo_network.png)
-
-**Interpretation:** The log-log plot for r/loseit shows the same approximately linear pattern. The network is larger than r/learnprogramming (3.55 million edges vs. 2 million), and the most active replier sent 24,464 replies, about twice the maximum in r/learnprogramming. The mean out-degree is 8.74 with a median of 2, showing the same kind of gap between typical and highly active users. The same skewed shape shows up in both subreddits, which suggests this is just how Reddit reply networks tend to look.
 
 
-## Part 3: r/depression
-
-**Figure 5.** BG/NBD input variable distributions for r/depression (N = 228,696 qualifying users).
-
-![BG/NBD Distributions: r/depression](figures/fig_dp_bgnbd.png)
-
-**Interpretation:** The distributions are right-skewed in the same way, but r/depression has a noticeably lower mean frequency (4.41) compared to r/learnprogramming (6.57) and r/loseit (9.46). The mean recency is also shorter at 18.95 weeks. This suggests that r/depression users tend to post for a shorter period and leave sooner. Many users probably post during a difficult time and stop once that period passes.
-
-**Figure 6.** Log-log degree distribution of the reply network for r/depression (2,056,916 edges, 586,867 nodes).
-
-![Network Log-Log: r/depression](figures/fig_dp_network.png)
-
-**Interpretation:** The log-log plot again shows an approximately linear trend, consistent with the other two subreddits. One difference worth noting is that only 47.6% of qualifying r/depression users appear in the reply network at all, compared to around 62% in r/learnprogramming and r/loseit. This means a larger share of r/depression users only posted top-level content without ever replying to others. In r/depression, people tend to post to share what they are going through rather than to have back-and-forth conversations, so fewer users end up replying to each other.
 
 
-## Challenges
 
-One challenge is that it is hard to identify users who deleted their accounts after the data was collected, because their posts still show up under their original usernames in the archive. This means the churn labels for these users may be incorrect.
 
-Another challenge is that a small number of users have negative tenure values, meaning their first activity appears to be after the observation end date. This is most likely a timestamp inconsistency introduced, but the exact cause is unclear. 
+## 我自己看的
+
+**整个研究的逻辑，只有一条主线：**
+"能不能用用户的行为数据，预测他们会不会离开这个社区（churn）？"
+
+**第一步：制造答案（Y标签）—— BG/NBD 的作用**
+BG/NBD 模型只做一件事：判断每个用户"还活着"还是已经"流失"了。
+
+它的输入就是你 EDA 里已经算好的三个数：
+
+frequency：这个用户回来过几次
+recency：第一次到最后一次之间隔了多久
+T：他从加入到现在总共多久
+输出就是每个用户一个概率值 p_alive：
+
+p_alive 接近 1 → 用户还活跃
+p_alive 接近 0 → 用户已经流失（churn）
+然后你设一个门槛，比如 p_alive < 0.5 → 打上标签 churned = 1，否则 churned = 0。
+
+这个标签就是你研究的 Y（因变量），三个 subreddit 都要做这一步。
+
+**第二步：制造原材料（X特征）—— NLP / Network 的作用**
+有了 Y（谁流失了），接下来要回答："用什么特征可以预测这个 Y？"
+
+model a: nlp
+model b: network
+model c: nlp + network
+
+**第三步：训练预测模型 —— ML 的作用**
+有了 X（特征）和 Y（标签），就可以训练机器学习模型了。
+
+Logistic Regression 和 Random Forest 都是分类器，输入 X，输出"这个用户会不会流失"的预测。 学习 X→Y 的关系
+
+你训练两个模型是为了比较哪个更准。
