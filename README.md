@@ -142,17 +142,6 @@ Each configuration is trained with two classifiers:
 
 ---
 
-## Key Decisions and Rationale
-
-| Decision | Rationale |
-|---|---|
-| BG/NBD for churn labeling | Accounts for irregular posting patterns; does not require a fixed inactivity cutoff |
-| No BERTopic | Computationally expensive for large subreddits; VADER + lexical diversity are sufficient content-level signals |
-| K-core instead of betweenness centrality | Betweenness is computationally infeasible for million-edge graphs; k-core identifies peripheral vs. core users at O(E) cost |
-| Louvain community detection | Fast (O(E log V)), widely validated, captures community structure relevant to retention |
-| Three subreddits | Tests whether findings generalize across different community types (learning, lifestyle, mental health) |
-
----
 
 ## Project Structure
 
