@@ -27,10 +27,10 @@ Three subreddits collected via Arctic Shift (observation window: subreddit creat
 ## Pipeline
 
 ```
-EDA (completed)
+EDA 
     │
     ▼
-Phase 1: Churn Labeling (BG/NBD)
+Phase 1: Churn Labeling (holdout-based)
     │   └─ Output: churned / active label per user (Y)
     │
     ▼
@@ -52,20 +52,20 @@ Phase 4: Evaluation & Cross-subreddit Comparison
 
 ---
 
-## Phase 1: Churn Labeling via BG/NBD
+## Phase 1: Churn Labeling
 
-The BG/NBD (Beta Geometric / Negative Binomial Distribution) model is used to generate churn labels. It is suited for non-contractual settings where users interact at self-determined intervals rather than on a fixed schedule.
+Churn is defined using a holdout period. A user is classified as **churned** (`y = 1`) if they made no posts or comments during the holdout period; otherwise they are classified as **active** (`y = 0`).
 
-**Inputs (already computed in EDA):**
-- `frequency`: number of repeat interactions after the first
-- `recency`: weeks between first and last interaction
-- `T`: weeks from first interaction to January 2026
+**Calibration period:** subreddit creation -> July 1, 2025
+
+**Holdout period:** July 1, 2025 -> January 1, 2026 (6 months)
 
 **Procedure:**
-1. Split each user's history into a calibration period and a holdout period
-2. Fit BG/NBD on the calibration period using the `lifetimes` library
-3. Compute `p_alive` (probability of still being active) for each user
-4. Label as **churned** (`y = 1`) if `p_alive < 0.10` AND no activity in holdout period; otherwise **active** (`y = 0`)
+1. Split each user's activity into calibration and holdout periods
+2. For each user, check whether they posted or commented at any point during the holdout period
+3. Label as **churned** (`y = 1`) if no activity in holdout; otherwise **active** (`y = 0`)
+
+**Note on BG/NBD:** The BG/NBD model was initially considered for churn labeling because it estimates each user's dropout probability from their posting history, which is better suited for users with irregular activity patterns. However, the model failed to converge on all three subreddits, most likely due to the wide range of observation periods in the data (from a few weeks to over 15 years). The holdout-based definition is used instead, which is standard practice in non-contractual churn research.
 
 ---
 
